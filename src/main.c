@@ -68,13 +68,31 @@ int main(){
     /* Calling X server to map the window */
     XMapWindow(display, window);
 
+    /* selecting the events which should be delivered to this window */
+    XSelectInput(display, window, ButtonPressMask);
+
     /* flushing the request */
     XFlush(display);
 
     /* Testing window we just created */
-    while (1){
+ 
+
+    for(;;){
+        
+        XEvent event;
+
+        XNextEvent(display, &event);
+
+    if (event.type == ButtonPress) {
+        printf(
+            "lockd: ButtonPress button=%u x=%d y=%d\n",
+            event.xbutton.button,
+            event.xbutton.x,
+            event.xbutton.y
+        );
     }
-    
+        /* process event */
+    }
 
     // XCloseDisplay(display);
 
