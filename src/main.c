@@ -1,26 +1,29 @@
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#include <X11/extensions/Xinerama.h>
 
 #include "input.h"
 #include "ui.h"
 
-/*
-    READY : no input grabs are held by lockd.
-    GRABBED : both keyboard and pointer grabs succeeded.
-*/
 enum lock_state
 {
     READY,
     GRABBED
 };
 
-
+struct monitor_window
+{
+    Window window;
+    GC gc;
+    XineramaScreenInfo monitor;
+};
 
 static const char *lock_state_name(enum lock_state state)
 {
-
     switch (state)
     {
     case READY:
@@ -34,22 +37,25 @@ static const char *lock_state_name(enum lock_state state)
     }
 }
 
-
-
-int main()
+static int find_window(
+    const struct monitor_window *windows,
+    int count,
+    Window window)
 {
+    for (int i = 0; i < count; i++)
+    {
+        if (windows[i].window == window)
+        {
+            return i;
+        }
+    }
 
-    /*
-        Display *display;
-        is an opaque Xlib data structure representing connection to X server.
-    */
-    Display *display;
+    return -1;
+}
 
-    /*
-        Opens a connection to the X server.
-        Passing NULL makes xlib use the display from the environment
-    */
-    display = XOpenDisplay(NULL);
+int main(void)
+{
+    Display *display = XOpenDisplay(NULL);
 
     if (display == NULL)
     {
@@ -57,167 +63,205 @@ int main()
         return 1;
     }
 
-    printf("lockd: connected to X server\n");
-
-    /* Name of the X11 display we are connected to. */
-    printf("  display: %s\n", DisplayString(display));
-
-    /* Vendor/implementation of the X11 server. */
-    printf("  vendor: %s\n", ServerVendor(display));
-
-    /* Major and revision number of the X11 protocol. */
-    printf("  protocol: %d.%d\n",
-           ProtocolVersion(display),
-           ProtocolRevision(display));
-
-    /*
-        Obtain the default screen and its root window.
-        The root window is the top-level parent for ordinary X11 windows on this screen
-    */
     int screen = DefaultScreen(display);
     Window root = RootWindow(display, screen);
 
-    printf("  screen: %d\n", screen);
-    printf("  root window: 0x%lx\n", root);
+    printf("lockd: connected to X server %s\n",
+           DisplayString(display));
 
-    int width = DisplayWidth(display, screen);
-    int height = DisplayHeight(display, screen);
+    printf("lockd: desktop dimensions %dx%d\n",
+           DisplayWidth(display, screen),
+           DisplayHeight(display, screen));
 
-    printf("  width: %d\n", width);
-    printf("  height: %d\n", height);
+    XineramaScreenInfo fallback_monitor;
+    XineramaScreenInfo *detected_monitors = NULL;
+    int monitor_count = 0;
 
-    /*
-        Create a window covering the screen dimentions
-        This is currently a basic test window; lock-screen rendering
-        and window-manager integration will be added later.
-    */
-    Window window = XCreateSimpleWindow(
-        display,
-        root,
-        0,
-        0,
-        width,
-        height,
-        0,
-        0,
-        0);
+    if (XineramaIsActive(display))
+    {
+        detected_monitors = XineramaQueryScreens(
+            display, &monitor_count);
+    }
 
+    if (detected_monitors == NULL || monitor_count == 0)
+    {
+        fallback_monitor.screen_number = screen;
+        fallback_monitor.x_org = 0;
+        fallback_monitor.y_org = 0;
+        fallback_monitor.width = DisplayWidth(display, screen);
+        fallback_monitor.height = DisplayHeight(display, screen);
 
+        monitor_count = 1;
+        detected_monitors = &fallback_monitor;
 
-    /* Create the graphics context used by the UI for drawing */
-    GC gc = XCreateGC(display, window, 0, NULL);
+        printf("lockd: using single-screen fallback\n");
+    }
 
-    ui_init(display, window, screen);
+    printf("lockd: detected %d monitor(s)\n", monitor_count);
 
-    /*
-        Subscribe to the events this window needs to observe
-        StructureNotifyMask allows lockd to recieve notification about
-        changes to the window's structure, including mapping.
-    */
-    XSelectInput(
-        display,
-        window,
-        ButtonPressMask | 
-        KeyPressMask | 
-        KeyReleaseMask | 
+    struct monitor_window *windows = calloc(
+        (size_t)monitor_count, sizeof(*windows));
+
+    if (windows == NULL)
+    {
+        fprintf(stderr, "lockd: failed to allocate monitor windows\n");
+
+        if (detected_monitors != &fallback_monitor)
+        {
+            XFree(detected_monitors);
+        }
+
+        XCloseDisplay(display);
+        return 1;
+    }
+
+    XSetWindowAttributes attributes = {0};
+
+    attributes.override_redirect = True;
+    attributes.background_pixel = BlackPixel(display, screen);
+    attributes.event_mask =
+        ButtonPressMask |
+        KeyPressMask |
+        KeyReleaseMask |
         StructureNotifyMask |
-        ExposureMask    
-    );
+        ExposureMask;
 
-    /* Requesting for X server to make this window visible */
-    XMapWindow(display, window);
+    int created = 0;
 
-    /* Send buffered Xlib requests to the server without waiting for a reply */
+    for (int i = 0; i < monitor_count; i++)
+    {
+        windows[i].monitor = detected_monitors[i];
+
+        XineramaScreenInfo *monitor = &windows[i].monitor;
+
+        printf(
+            "lockd: monitor %d: x=%d y=%d width=%d height=%d\n",
+            i,
+            monitor->x_org,
+            monitor->y_org,
+            monitor->width,
+            monitor->height);
+
+        windows[i].window = XCreateWindow(
+            display,
+            root,
+            monitor->x_org,
+            monitor->y_org,
+            (unsigned int)monitor->width,
+            (unsigned int)monitor->height,
+            0,
+            CopyFromParent,
+            InputOutput,
+            CopyFromParent,
+            CWOverrideRedirect | CWBackPixel | CWEventMask,
+            &attributes);
+
+        if (windows[i].window == None)
+        {
+            fprintf(stderr,
+                    "lockd: failed to create window for monitor %d\n",
+                    i);
+            break;
+        }
+
+        windows[i].gc = XCreateGC(
+            display, windows[i].window, 0, NULL);
+
+        if (windows[i].gc == NULL)
+        {
+            fprintf(stderr,
+                    "lockd: failed to create graphics context\n");
+
+            XDestroyWindow(display, windows[i].window);
+            windows[i].window = None;
+            break;
+        }
+
+        ui_init(display, windows[i].window, screen);
+
+        XMapRaised(display, windows[i].window);
+        created++;
+    }
+
+    if (detected_monitors != &fallback_monitor)
+    {
+        XFree(detected_monitors);
+    }
+
+    if (created != monitor_count)
+    {
+        for (int i = 0; i < created; i++)
+        {
+            XFreeGC(display, windows[i].gc);
+            XDestroyWindow(display, windows[i].window);
+        }
+
+        if (created > 0)
+        {
+            ui_cleanup(display);
+        }
+
+        free(windows);
+        XCloseDisplay(display);
+        return 1;
+    }
+
     XFlush(display);
 
-    /* enum state */
     enum lock_state state = READY;
-
     int running = 1;
 
     /*
-        Process X11 events until shutdown is requested.
-        The current development controls are:
-            g - attempt to acquire keyboard and pointer grabs
-            u - release grabs
-            q - exit the program
-    */
+     * Focus one window for development keyboard controls.
+     * Input grabs will be revisited for the multi-window design.
+     */
+    XSetInputFocus(
+        display,
+        windows[0].window,
+        RevertToParent,
+        CurrentTime);
+
     while (running)
     {
-
         XEvent event;
         XNextEvent(display, &event);
 
+        int index = find_window(
+            windows, monitor_count, event.xany.window);
+
+        if (index < 0)
+        {
+            continue;
+        }
+
+        Window window = windows[index].window;
+        GC gc = windows[index].gc;
+        XineramaScreenInfo *monitor = &windows[index].monitor;
+
         if (event.type == MapNotify)
         {
-            printf("lockd: MapNotify event=0x%lx window=0x%lx override_redirect=%d\n",
-                   event.xmap.event,
-                   event.xmap.window,
-                   event.xmap.override_redirect);
+            printf("lockd: monitor %d window mapped: 0x%lx\n",
+                   index, window);
 
-            /*
-                wait until the window has been mapped before requesting input focus
-                requesting focus too early caused BadMatch during earlier tests.
-            */
-            XSetInputFocus(
-                display,
-                window,
-                RevertToParent,
-                CurrentTime);
-
-            ui_draw(display, window, gc, screen);
-
+            ui_draw(display, window, gc, screen, monitor);
             XFlush(display);
         }
-
-
-        if (event.type == UnmapNotify)
+        else if (event.type == Expose && event.xexpose.count == 0)
         {
-            printf(
-                "lockd: UnmapNotify event=0x%lx window=0x%lx from_configure=%d\n",
-                event.xunmap.event,
-                event.xunmap.window,
-                event.xunmap.from_configure);
+            ui_draw(display, window, gc, screen, monitor);
+            XFlush(display);
         }
-
-
-        if (event.type == ReparentNotify)
+        else if (event.type == ButtonPress)
         {
-            printf(
-                "lockd: ReparentNotify event=0x%lx window=0x%lx parent=0x%lx\n",
-                event.xreparent.event,
-                event.xreparent.window,
-                event.xreparent.parent);
+            printf("lockd: monitor %d ButtonPress button=%u\n",
+                   index, event.xbutton.button);
         }
-
-
-        if (event.type == MotionNotify)
+        else if (event.type == KeyPress)
         {
-            printf(
-                "lockd: MotionNotify x=%d y=%d\n",
-                event.xmotion.x,
-                event.xmotion.y);
-        }
-
-
-        if (event.type == ButtonPress)
-        {
-            printf(
-                "lockd: ButtonPress button=%u x=%d y=%d\n",
-                event.xbutton.button,
-                event.xbutton.x,
-                event.xbutton.y);
-        }
-
-
-        if (event.type == KeyPress)
-        {
-
             KeySym keysym;
             char buffer[32];
-            int length;
 
-            length = XLookupString(
+            int length = XLookupString(
                 &event.xkey,
                 buffer,
                 sizeof(buffer) - 1,
@@ -226,107 +270,71 @@ int main()
 
             buffer[length] = '\0';
 
-            const char *keysym_name = XKeysymToString(keysym);
-           
-            printf(
-                "lockd: KeyPress keycode=%u\n keysym=%s bytes=%d text=\"%s\"\n",
-                event.xkey.keycode,
-                keysym_name != NULL ? keysym_name : "Unknown",
-                length,
-                buffer);
+            const char *name = XKeysymToString(keysym);
 
+            printf("lockd: KeyPress keysym=%s text=\"%s\"\n",
+                   name != NULL ? name : "Unknown",
+                   buffer);
 
             if (keysym == XK_q)
             {
                 printf("lockd: shutdown requested\n");
                 running = 0;
             }
-
-
-
-            /*
-                acquire input only when lockd is not already holding the grabs
-            */
-            if (keysym == XK_g && state == READY)
+            else if (keysym == XK_g && state == READY)
             {
                 if (acquire_input(display, window))
                 {
                     state = GRABBED;
-                    printf("lockd: state=%s\n", lock_state_name(state));
                 }
-                else
-                {
-                    state = READY;
-                    printf("lockd: state=%s\n", lock_state_name(state));
-                }
+
+                printf("lockd: state=%s\n",
+                       lock_state_name(state));
             }
-
-
-
-            /* release input only when both grabs were acquired successfully */
-            if (keysym == XK_u && state == GRABBED)
+            else if (keysym == XK_u && state == GRABBED)
             {
                 release_input(display);
                 state = READY;
-                printf("lockd: state=%s\n", lock_state_name(state));
+
+                printf("lockd: state=%s\n",
+                       lock_state_name(state));
             }
-
         }
-
-
-
-        if (event.type == KeyRelease)
+        else if (event.type == KeyRelease)
         {
-            printf(
-                "lockd: KeyRelease keycode=%u\n",
-                event.xkey.keycode);
+            printf("lockd: KeyRelease keycode=%u\n",
+                   event.xkey.keycode);
         }
-
-
-
-        if (event.type == DestroyNotify)
+        else if (event.type == UnmapNotify)
         {
-            printf(
-                "lockd: DestroyNotify window=0x%lx\n",
-                event.xdestroywindow.window);
-
+            printf("lockd: monitor %d window unmapped\n", index);
+        }
+        else if (event.type == DestroyNotify)
+        {
+            printf("lockd: monitor %d window destroyed\n", index);
             running = 0;
         }
-
-
-
-        /* 
-            Redraw the UI when the X server reports that part of 
-            the window needs to be repainted.
-        */
-       if(event.type == Expose && event.xexpose.count == 0){
-            ui_draw(display, window, gc, screen);
-            XFlush(display);
-       }
-
     }
 
-
-
-
-    /*
-        Ensure no input grabs remain active when the program exits.
-        destroy the test window and close the connection to X server.
-    */
     if (state == GRABBED)
     {
         release_input(display);
         state = READY;
-        printf("lockd: state=%s\n", lock_state_name(state));
+
+        printf("lockd: state=%s\n",
+               lock_state_name(state));
     }
 
+    for (int i = 0; i < monitor_count; i++)
+    {
+        XFreeGC(display, windows[i].gc);
+        XDestroyWindow(display, windows[i].window);
+    }
 
-    /* releasing the graphics context */
-    XFreeGC(display, gc);
+    ui_cleanup(display);
 
-    XDestroyWindow(display, window);
     XCloseDisplay(display);
-
+    free(windows);
 
     printf("lockd: shutdown complete\n");
     return 0;
