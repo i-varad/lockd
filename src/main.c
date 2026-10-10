@@ -3,32 +3,43 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 
-
-enum lock_state {
+/*
+    READY : no input grabs are held by lockd.
+    GRABBED : both keyboard and pointer grabs succeeded.
+*/
+enum lock_state
+{
     READY,
-    GRABBED,
-    ERROR
+    GRABBED
 };
 
+static const char *lock_state_name(enum lock_state state)
+{
 
-static const char *lock_state_name(enum lock_state state){
-    
     switch (state)
     {
-    case READY :
+    case READY:
         return "READY";
-        
+
     case GRABBED:
         return "GRABBED";
-    
+
     default:
         return "UNKNOWN";
     }
-
 }
 
+/*
+    Acquire keyboard and pointer input as one logical operation.
 
-/* keyboard and pointer aquisition handler */
+    X11 acquires these separately.
+    If keyboard acquisition succeeded and pointer acquisition failed,
+    In that case, release the keyboard grab before returning the failuer
+    to avoid a partially grabbed acquired state.
+
+    Returns 1 if both grabs succeed, or 0 otherwise.
+*/
+
 static int acquire_input(Display *display, Window window)
 {
     int status;
@@ -81,7 +92,10 @@ static int acquire_input(Display *display, Window window)
     return 1;
 }
 
-/* release inputs */
+/*
+    Release both input grabs and flush the request to X server.
+    Used when the user unlocks the prototype or during shutdown.
+*/
 static void release_input(Display *display)
 {
     XUngrabPointer(display, CurrentTime);
@@ -96,14 +110,17 @@ int main()
 {
 
     /*
-    Display *display;
-    is an opaque Xlib data structure representing connection to X server.
+        Display *display;
+        is an opaque Xlib data structure representing connection to X server.
     */
     Display *display;
 
+    /*
+        Opens a connection to the X server.
+        Passing NULL makes xlib use the display from the environment
+    */
     display = XOpenDisplay(NULL);
 
-    // confirming if connection to X server is established or not.
     if (display == NULL)
     {
         fprintf(stderr, "lockd: failed to open X display\n");
@@ -123,6 +140,10 @@ int main()
            ProtocolVersion(display),
            ProtocolRevision(display));
 
+    /*
+        Obtain the default screen and its root window.
+        The root window is the top-level parent for ordinary X11 windows on this screen
+    */
     int screen = DefaultScreen(display);
     Window root = RootWindow(display, screen);
 
@@ -135,8 +156,11 @@ int main()
     printf("  width: %d\n", width);
     printf("  height: %d\n", height);
 
-    /* Creating first Window */
-
+    /*
+        Create a window covering the screen dimentions
+        This is currently a basic test window; lock-screen rendering
+        and window-manager integration will be added later.
+    */
     Window window = XCreateSimpleWindow(
         display,
         root,
@@ -148,41 +172,38 @@ int main()
         0,
         0);
 
+    /*
+        Subscribe to the events this window needs to observe
+        StructureNotifyMask allows lockd to recieve notification about
+        changes to the window's structure, including mapping.
+    */
     XSelectInput(
         display,
         window,
         ButtonPressMask | KeyPressMask | KeyReleaseMask | StructureNotifyMask);
 
-    /* Calling X server to map the window */
+    /* Requesting for X server to make this window visible */
     XMapWindow(display, window);
 
-    /* flushing the requests from the buffer */
+    /* Send buffered Xlib requests to the server without waiting for a reply */
     XFlush(display);
 
-    // XSetInputFocus(
-    //     display,
-    //     window,
-    //     RevertToParent,
-    //     CurrentTime
-    // );
-
-    // XFlush(display);
-
-    /* selecting the events which should be delivered to this window */
-
-    /* Testing window we just created */
-
-    /* State Variable for keyboard and mouse inputs */
+    /* enum state */
     enum lock_state state = READY;
 
-    // added while testing
     int running = 1;
 
-    /*Event Loop*/
+    /*
+        Process X11 events until shutdown is requested.
+        The current development controls are:
+            g - attempt to acquire keyboard and pointer grabs
+            u - release grabs
+            q - exit the program
+    */
     while (running)
     {
-        XEvent event;
 
+        XEvent event;
         XNextEvent(display, &event);
 
         if (event.type == MapNotify)
@@ -192,6 +213,10 @@ int main()
                    event.xmap.window,
                    event.xmap.override_redirect);
 
+            /*
+                wait until the window has been mapped before requesting input focus
+                requesting focus too early caused BadMatch during earlier tests.
+            */
             XSetInputFocus(
                 display,
                 window,
@@ -200,6 +225,7 @@ int main()
 
             XFlush(display);
         }
+
 
         if (event.type == UnmapNotify)
         {
@@ -210,6 +236,7 @@ int main()
                 event.xunmap.from_configure);
         }
 
+
         if (event.type == ReparentNotify)
         {
             printf(
@@ -219,6 +246,7 @@ int main()
                 event.xreparent.parent);
         }
 
+
         if (event.type == MotionNotify)
         {
             printf(
@@ -226,6 +254,7 @@ int main()
                 event.xmotion.x,
                 event.xmotion.y);
         }
+
 
         if (event.type == ButtonPress)
         {
@@ -235,6 +264,7 @@ int main()
                 event.xbutton.x,
                 event.xbutton.y);
         }
+
 
         if (event.type == KeyPress)
         {
@@ -252,14 +282,15 @@ int main()
 
             buffer[length] = '\0';
 
+            const char *keysym_name = XKeysymToString(keysym);
+           
             printf(
                 "lockd: KeyPress keycode=%u\n keysym=%s bytes=%d text=\"%s\"\n",
                 event.xkey.keycode,
-                XKeysymToString(keysym) != NULL ? XKeysymToString(keysym) : "Unknown",
+                keysym_name != NULL ? keysym_name : "Unknown",
                 length,
                 buffer);
 
-            /* testing */
 
             if (keysym == XK_q)
             {
@@ -267,30 +298,38 @@ int main()
                 running = 0;
             }
 
-            /* inputs aquisition / grab handlers implementation */
 
+
+            /*
+                acquire input only when lockd is not already holding the grabs
+            */
             if (keysym == XK_g && state == READY)
             {
-                if(acquire_input(display, window)){
+                if (acquire_input(display, window))
+                {
                     state = GRABBED;
                     printf("lockd: state=%s\n", lock_state_name(state));
-                } else {
+                }
+                else
+                {
                     state = READY;
                     printf("lockd: state=%s\n", lock_state_name(state));
-
                 }
             }
 
+
+
+            /* release input only when both grabs were acquired successfully */
             if (keysym == XK_u && state == GRABBED)
             {
                 release_input(display);
                 state = READY;
                 printf("lockd: state=%s\n", lock_state_name(state));
-
             }
 
-            /* inputs aquisition handlers implementation end*/
         }
+
+
 
         if (event.type == KeyRelease)
         {
@@ -298,6 +337,8 @@ int main()
                 "lockd: KeyRelease keycode=%u\n",
                 event.xkey.keycode);
         }
+
+
 
         if (event.type == DestroyNotify)
         {
@@ -307,22 +348,29 @@ int main()
 
             running = 0;
         }
+
     }
 
+
+
+
+    /*
+        Ensure no input grabs remain active when the program exits.
+        destroy the test window and close the connection to X server.
+    */
     if (state == GRABBED)
     {
         release_input(display);
         state = READY;
         printf("lockd: state=%s\n", lock_state_name(state));
-
     }
+
+
 
     XDestroyWindow(display, window);
     XCloseDisplay(display);
 
+
     printf("lockd: shutdown complete\n");
-
-    // XCloseDisplay(display);
-
     return 0;
 }
