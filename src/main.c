@@ -3,6 +3,78 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 
+
+
+/* keyboard and pointer aquisition handler */
+static int acquire_input(Display *display, Window window){
+        int status;
+
+        status = XGrabKeyboard(
+            display,
+            window,
+            False,
+            GrabModeAsync,
+            GrabModeAsync,
+            CurrentTime
+        );
+
+        if(status != GrabSuccess){
+            fprintf(
+                stderr, "lockd: keyboard grab failed, status=%d\n",
+                status
+            );
+
+            return 0;
+        } 
+
+        printf("lockd: keyboard grab successful\n");
+
+
+        status = XGrabPointer(
+            display,
+            window,
+            False,
+            ButtonPressMask | ButtonReleaseMask | PointerMotionMask, 
+            GrabModeAsync, 
+            GrabModeAsync, 
+            None, 
+            None, 
+            CurrentTime
+        );
+
+        if(status != GrabSuccess){
+            fprintf(
+                stderr,
+                "lockd: pointer grab failed, status=%d\n",
+                status
+            );
+
+            XUngrabKeyboard(display, CurrentTime);
+            XFlush(display);
+
+            printf("lockd: keyboard grab rolled back\n");
+            return 0;
+        }
+
+
+        printf("lockd: pointer grab successful\n");
+        return 1;
+}
+
+
+
+/* release inputs */
+static void release_input(Display *display){
+    XUngrabPointer(display, CurrentTime);
+    XUngrabKeyboard(display, CurrentTime);
+
+    XFlush(display);
+
+
+    printf("lockd: input grabs released\n");
+}
+
+
 int main()
 {
 
@@ -84,9 +156,8 @@ int main()
     /* Testing window we just created */
 
 
-    /* State Variables for keyboard and mouse grab */
-    int keyboard_grabbed = 0;
-    int pointer_grabbed = 0;
+    /* State Variable for keyboard and mouse inputs */
+    int input_grabbed = 0;
 
     /*Event Loop*/
     for (;;)
@@ -151,77 +222,19 @@ int main()
             );  
 
 
-            /* keyboard_grab */
+            /* inputs aquisition handlers implementation */
 
-            if(keysym == XK_g && !keyboard_grabbed){
-                int status;
-
-                status = XGrabKeyboard(
-                    display,
-                    window,
-                    False,
-                    GrabModeAsync,
-                    GrabModeAsync,
-                    CurrentTime
-                );
-
-                if(status == GrabSuccess){
-                    keyboard_grabbed = 1;
-                    printf("lockd: keyboard grab successful\n");
-                }   else {
-                    printf("lockd: keyboard grab failed, status=%d\n",
-                    status);
-                }
+            if(keysym == XK_g && !input_grabbed){
+                input_grabbed = acquire_input(display, window);
             }
 
-            
-            if(keysym == XK_u && keyboard_grabbed){
-                XUngrabKeyboard(display, CurrentTime);
-                XFlush(display);
-                
-                keyboard_grabbed = 0;
-                printf("lockd: keyboard grab released\n");
-            }
-            /* keyboard_grab end */
-
-
-
-            /* mouse_grab function */
-
-            if(keysym == XK_p && !pointer_grabbed){
-                int status;
-
-                status = XGrabPointer(
-                    display,
-                    window,
-                    False,
-                    ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-                    GrabModeAsync,
-                    GrabModeAsync,
-                    None,
-                    None,
-                    CurrentTime
-                );
-
-
-                if(status == GrabSuccess){
-                    pointer_grabbed = 1;
-                    printf("lockd: pointer grab successful\n");
-                }   else {
-                    printf("lockd: pointer grab failed, state=%d\n", status);
-                }
+            if(keysym == XK_u && input_grabbed){
+                release_input(display);
+                input_grabbed = 0;
             }
 
-            if(keysym == XK_o && pointer_grabbed){
-                XUngrabPointer(display, CurrentTime);
-                XFlush(display);
+            /* inputs aquisition handlers implementation end*/
 
-
-                pointer_grabbed = 0;
-                printf("lockd: pointer grab released\n");
-            }
-
-            /* mouse_grab function end*/
 
         }
 
