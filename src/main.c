@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
 
 int main()
 {
@@ -65,7 +67,7 @@ int main()
     /* Calling X server to map the window */
     XMapWindow(display, window);
 
-    /* flushing the request */
+    /* flushing the requests from the buffer */
     XFlush(display);
 
     // XSetInputFocus(
@@ -75,7 +77,7 @@ int main()
     //     CurrentTime
     // );
 
-    XFlush(display);
+    // XFlush(display);
 
     /* selecting the events which should be delivered to this window */
 
@@ -111,9 +113,28 @@ int main()
 
         if (event.type == KeyPress)
         {
+            
+            KeySym keysym;
+            char buffer[32];
+            int length;
+
+            length = XLookupString(
+                &event.xkey,
+                buffer,
+                sizeof(buffer) - 1,
+                &keysym,
+                NULL
+            );
+ 
+            buffer[length] = '\0';
+
             printf(
-                "lockd: KeyPress keycode=%u\n",
-                event.xkey.keycode);
+                "lockd: KeyPress keycode=%u\n keysym=%s bytes=%d text=\"%s\"\n",
+                event.xkey.keycode, 
+                XKeysymToString(keysym) != NULL ? XKeysymToString(keysym) : "Unknown",
+                length,
+                buffer
+            );  
         }
 
         if (event.type == KeyRelease)
