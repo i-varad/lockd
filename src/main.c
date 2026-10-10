@@ -4,76 +4,93 @@
 #include <X11/keysym.h>
 
 
-
-/* keyboard and pointer aquisition handler */
-static int acquire_input(Display *display, Window window){
-        int status;
-
-        status = XGrabKeyboard(
-            display,
-            window,
-            False,
-            GrabModeAsync,
-            GrabModeAsync,
-            CurrentTime
-        );
-
-        if(status != GrabSuccess){
-            fprintf(
-                stderr, "lockd: keyboard grab failed, status=%d\n",
-                status
-            );
-
-            return 0;
-        } 
-
-        printf("lockd: keyboard grab successful\n");
+enum lock_state {
+    READY,
+    GRABBED,
+    ERROR
+};
 
 
-        status = XGrabPointer(
-            display,
-            window,
-            False,
-            ButtonPressMask | ButtonReleaseMask | PointerMotionMask, 
-            GrabModeAsync, 
-            GrabModeAsync, 
-            None, 
-            None, 
-            CurrentTime
-        );
+static const char *lock_state_name(enum lock_state state){
+    
+    switch (state)
+    {
+    case READY :
+        return "READY";
+        
+    case GRABBED:
+        return "GRABBED";
+    
+    default:
+        return "UNKNOWN";
+    }
 
-        if(status != GrabSuccess){
-            fprintf(
-                stderr,
-                "lockd: pointer grab failed, status=%d\n",
-                status
-            );
-
-            XUngrabKeyboard(display, CurrentTime);
-            XFlush(display);
-
-            printf("lockd: keyboard grab rolled back\n");
-            return 0;
-        }
-
-
-        printf("lockd: pointer grab successful\n");
-        return 1;
 }
 
 
+/* keyboard and pointer aquisition handler */
+static int acquire_input(Display *display, Window window)
+{
+    int status;
+
+    status = XGrabKeyboard(
+        display,
+        window,
+        False,
+        GrabModeAsync,
+        GrabModeAsync,
+        CurrentTime);
+
+    if (status != GrabSuccess)
+    {
+        fprintf(
+            stderr, "lockd: keyboard grab failed, status=%d\n",
+            status);
+
+        return 0;
+    }
+
+    printf("lockd: keyboard grab successful\n");
+
+    status = XGrabPointer(
+        display,
+        window,
+        False,
+        ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+        GrabModeAsync,
+        GrabModeAsync,
+        None,
+        None,
+        CurrentTime);
+
+    if (status != GrabSuccess)
+    {
+        fprintf(
+            stderr,
+            "lockd: pointer grab failed, status=%d\n",
+            status);
+
+        XUngrabKeyboard(display, CurrentTime);
+        XFlush(display);
+
+        printf("lockd: keyboard grab rolled back\n");
+        return 0;
+    }
+
+    printf("lockd: pointer grab successful\n");
+    return 1;
+}
 
 /* release inputs */
-static void release_input(Display *display){
+static void release_input(Display *display)
+{
     XUngrabPointer(display, CurrentTime);
     XUngrabKeyboard(display, CurrentTime);
 
     XFlush(display);
 
-
     printf("lockd: input grabs released\n");
 }
-
 
 int main()
 {
@@ -155,9 +172,8 @@ int main()
 
     /* Testing window we just created */
 
-
     /* State Variable for keyboard and mouse inputs */
-    int input_grabbed = 0;
+    enum lock_state state = READY;
 
     // added while testing
     int running = 1;
@@ -171,7 +187,10 @@ int main()
 
         if (event.type == MapNotify)
         {
-            printf("lockd: window mapped\n");
+            printf("lockd: MapNotify event=0x%lx window=0x%lx override_redirect=%d\n",
+                   event.xmap.event,
+                   event.xmap.window,
+                   event.xmap.override_redirect);
 
             XSetInputFocus(
                 display,
@@ -182,14 +201,32 @@ int main()
             XFlush(display);
         }
 
-        if(event.type == MotionNotify){
+        if (event.type == UnmapNotify)
+        {
+            printf(
+                "lockd: UnmapNotify event=0x%lx window=0x%lx from_configure=%d\n",
+                event.xunmap.event,
+                event.xunmap.window,
+                event.xunmap.from_configure);
+        }
+
+        if (event.type == ReparentNotify)
+        {
+            printf(
+                "lockd: ReparentNotify event=0x%lx window=0x%lx parent=0x%lx\n",
+                event.xreparent.event,
+                event.xreparent.window,
+                event.xreparent.parent);
+        }
+
+        if (event.type == MotionNotify)
+        {
             printf(
                 "lockd: MotionNotify x=%d y=%d\n",
                 event.xmotion.x,
-                event.xmotion.y 
-            );
+                event.xmotion.y);
         }
-        
+
         if (event.type == ButtonPress)
         {
             printf(
@@ -201,7 +238,7 @@ int main()
 
         if (event.type == KeyPress)
         {
-            
+
             KeySym keysym;
             char buffer[32];
             int length;
@@ -211,41 +248,48 @@ int main()
                 buffer,
                 sizeof(buffer) - 1,
                 &keysym,
-                NULL
-            );
- 
+                NULL);
+
             buffer[length] = '\0';
 
             printf(
                 "lockd: KeyPress keycode=%u\n keysym=%s bytes=%d text=\"%s\"\n",
-                event.xkey.keycode, 
+                event.xkey.keycode,
                 XKeysymToString(keysym) != NULL ? XKeysymToString(keysym) : "Unknown",
                 length,
-                buffer
-            );  
+                buffer);
 
-            
             /* testing */
 
-            if(keysym == XK_q){
+            if (keysym == XK_q)
+            {
                 printf("lockd: shutdown requested\n");
                 running = 0;
             }
 
             /* inputs aquisition / grab handlers implementation */
 
-            if(keysym == XK_g && !input_grabbed){
-                input_grabbed = acquire_input(display, window);
+            if (keysym == XK_g && state == READY)
+            {
+                if(acquire_input(display, window)){
+                    state = GRABBED;
+                    printf("lockd: state=%s\n", lock_state_name(state));
+                } else {
+                    state = READY;
+                    printf("lockd: state=%s\n", lock_state_name(state));
+
+                }
             }
 
-            if(keysym == XK_u && input_grabbed){
+            if (keysym == XK_u && state == GRABBED)
+            {
                 release_input(display);
-                input_grabbed = 0;
+                state = READY;
+                printf("lockd: state=%s\n", lock_state_name(state));
+
             }
 
             /* inputs aquisition handlers implementation end*/
-
-
         }
 
         if (event.type == KeyRelease)
@@ -254,11 +298,23 @@ int main()
                 "lockd: KeyRelease keycode=%u\n",
                 event.xkey.keycode);
         }
+
+        if (event.type == DestroyNotify)
+        {
+            printf(
+                "lockd: DestroyNotify window=0x%lx\n",
+                event.xdestroywindow.window);
+
+            running = 0;
+        }
     }
 
-    if(input_grabbed){
+    if (state == GRABBED)
+    {
         release_input(display);
-        input_grabbed = 0;
+        state = READY;
+        printf("lockd: state=%s\n", lock_state_name(state));
+
     }
 
     XDestroyWindow(display, window);
