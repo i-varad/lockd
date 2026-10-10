@@ -116,7 +116,12 @@ int main()
     XSelectInput(
         display,
         window,
-        ButtonPressMask | KeyPressMask | KeyReleaseMask | StructureNotifyMask);
+        ButtonPressMask | 
+        KeyPressMask | 
+        KeyReleaseMask | 
+        StructureNotifyMask |
+        ExposureMask    
+    );
 
     /* Requesting for X server to make this window visible */
     XMapWindow(display, window);
@@ -317,7 +322,7 @@ int main()
 
     /* releasing the graphics context */
     XFreeGC(display, gc);
-    
+
     XDestroyWindow(display, window);
     XCloseDisplay(display);
 
