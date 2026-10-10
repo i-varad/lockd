@@ -159,8 +159,11 @@ int main()
     /* State Variable for keyboard and mouse inputs */
     int input_grabbed = 0;
 
+    // added while testing
+    int running = 1;
+
     /*Event Loop*/
-    for (;;)
+    while (running)
     {
         XEvent event;
 
@@ -221,8 +224,15 @@ int main()
                 buffer
             );  
 
+            
+            /* testing */
 
-            /* inputs aquisition handlers implementation */
+            if(keysym == XK_q){
+                printf("lockd: shutdown requested\n");
+                running = 0;
+            }
+
+            /* inputs aquisition / grab handlers implementation */
 
             if(keysym == XK_g && !input_grabbed){
                 input_grabbed = acquire_input(display, window);
@@ -245,6 +255,16 @@ int main()
                 event.xkey.keycode);
         }
     }
+
+    if(input_grabbed){
+        release_input(display);
+        input_grabbed = 0;
+    }
+
+    XDestroyWindow(display, window);
+    XCloseDisplay(display);
+
+    printf("lockd: shutdown complete\n");
 
     // XCloseDisplay(display);
 
