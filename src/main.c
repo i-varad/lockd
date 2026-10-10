@@ -3,6 +3,8 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 
+#include "input.h"
+
 /*
     READY : no input grabs are held by lockd.
     GRABBED : both keyboard and pointer grabs succeeded.
@@ -12,6 +14,8 @@ enum lock_state
     READY,
     GRABBED
 };
+
+
 
 static const char *lock_state_name(enum lock_state state)
 {
@@ -29,82 +33,7 @@ static const char *lock_state_name(enum lock_state state)
     }
 }
 
-/*
-    Acquire keyboard and pointer input as one logical operation.
 
-    X11 acquires these separately.
-    If keyboard acquisition succeeded and pointer acquisition failed,
-    In that case, release the keyboard grab before returning the failuer
-    to avoid a partially grabbed acquired state.
-
-    Returns 1 if both grabs succeed, or 0 otherwise.
-*/
-
-static int acquire_input(Display *display, Window window)
-{
-    int status;
-
-    status = XGrabKeyboard(
-        display,
-        window,
-        False,
-        GrabModeAsync,
-        GrabModeAsync,
-        CurrentTime);
-
-    if (status != GrabSuccess)
-    {
-        fprintf(
-            stderr, "lockd: keyboard grab failed, status=%d\n",
-            status);
-
-        return 0;
-    }
-
-    printf("lockd: keyboard grab successful\n");
-
-    status = XGrabPointer(
-        display,
-        window,
-        False,
-        ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-        GrabModeAsync,
-        GrabModeAsync,
-        None,
-        None,
-        CurrentTime);
-
-    if (status != GrabSuccess)
-    {
-        fprintf(
-            stderr,
-            "lockd: pointer grab failed, status=%d\n",
-            status);
-
-        XUngrabKeyboard(display, CurrentTime);
-        XFlush(display);
-
-        printf("lockd: keyboard grab rolled back\n");
-        return 0;
-    }
-
-    printf("lockd: pointer grab successful\n");
-    return 1;
-}
-
-/*
-    Release both input grabs and flush the request to X server.
-    Used when the user unlocks the prototype or during shutdown.
-*/
-static void release_input(Display *display)
-{
-    XUngrabPointer(display, CurrentTime);
-    XUngrabKeyboard(display, CurrentTime);
-
-    XFlush(display);
-
-    printf("lockd: input grabs released\n");
-}
 
 int main()
 {
