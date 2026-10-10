@@ -83,6 +83,12 @@ int main()
 
     /* Testing window we just created */
 
+
+    /* State Variables for keyboard and mouse grab */
+    int keyboard_grabbed = 0;
+    int pointer_grabbed = 0;
+
+    /*Event Loop*/
     for (;;)
     {
         XEvent event;
@@ -102,6 +108,14 @@ int main()
             XFlush(display);
         }
 
+        if(event.type == MotionNotify){
+            printf(
+                "lockd: MotionNotify x=%d y=%d\n",
+                event.xmotion.x,
+                event.xmotion.y 
+            );
+        }
+        
         if (event.type == ButtonPress)
         {
             printf(
@@ -135,6 +149,80 @@ int main()
                 length,
                 buffer
             );  
+
+
+            /* keyboard_grab */
+
+            if(keysym == XK_g && !keyboard_grabbed){
+                int status;
+
+                status = XGrabKeyboard(
+                    display,
+                    window,
+                    False,
+                    GrabModeAsync,
+                    GrabModeAsync,
+                    CurrentTime
+                );
+
+                if(status == GrabSuccess){
+                    keyboard_grabbed = 1;
+                    printf("lockd: keyboard grab successful\n");
+                }   else {
+                    printf("lockd: keyboard grab failed, status=%d\n",
+                    status);
+                }
+            }
+
+            
+            if(keysym == XK_u && keyboard_grabbed){
+                XUngrabKeyboard(display, CurrentTime);
+                XFlush(display);
+                
+                keyboard_grabbed = 0;
+                printf("lockd: keyboard grab released\n");
+            }
+            /* keyboard_grab end */
+
+
+
+            /* mouse_grab function */
+
+            if(keysym == XK_p && !pointer_grabbed){
+                int status;
+
+                status = XGrabPointer(
+                    display,
+                    window,
+                    False,
+                    ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+                    GrabModeAsync,
+                    GrabModeAsync,
+                    None,
+                    None,
+                    CurrentTime
+                );
+
+
+                if(status == GrabSuccess){
+                    pointer_grabbed = 1;
+                    printf("lockd: pointer grab successful\n");
+                }   else {
+                    printf("lockd: pointer grab failed, state=%d\n", status);
+                }
+            }
+
+            if(keysym == XK_o && pointer_grabbed){
+                XUngrabPointer(display, CurrentTime);
+                XFlush(display);
+
+
+                pointer_grabbed = 0;
+                printf("lockd: pointer grab released\n");
+            }
+
+            /* mouse_grab function end*/
+
         }
 
         if (event.type == KeyRelease)
