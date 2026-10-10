@@ -1,0 +1,15 @@
+Test A — Shutdown without grabs
+Passed
+Pressed q; the event loop exited and shutdown completed.
+
+
+
+Test B — Shutdown with both grabs
+Passed
+Both grabs succeeded, then cleanup released them before destroying the window and closing the connection.
+
+
+
+Test C — Pointer-grab failure
+Passed
+The keyboard grab was rolled back after pointer acquisition failed, and shutdown still completed correctly.
