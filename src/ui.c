@@ -3,30 +3,41 @@
 
 #include "ui.h"
 
+/*
+    configure the window's background before the first draw.
+*/
+
+void ui_init(Display *display, Window window, int screen)
+{
+
+    XSetWindowBackground(
+        display,
+        window,
+        BlackPixel(display, screen));
+}
 
 /*
-    Draw the initial lock-screen contents into an existing window.
- 
-    The caller owns the X11 connection, window, and graphics context.
- */
+    Draw the lockscreen content onto the supplied window
 
-void ui_draw(Display *display, Window window, GC gc, int screen){
+    This function may be called repeatedly when the window needs to be repainted
+*/
+void ui_draw(Display *display, Window window, GC gc, int screen)
+{
 
-    /* Clear the window using the screen's black pixel. */
-    XSetWindowBackground(display, window, BlackPixel(display, screen));
+    /* Clear the window using its configured background color. */
     XClearWindow(display, window);
 
-    /* Draw the initial label in white */
+    /* Draw the initial label in white. */
     XSetForeground(display, gc, WhitePixel(display, screen));
 
     const char *message = "lockd - screen locker development";
 
     XDrawString(
-        display, 
-        window, 
-        gc, 
-        40, 
-        60, 
-        message, 
+        display,
+        window,
+        gc,
+        40,
+        60,
+        message,
         (int)strlen(message));
 }

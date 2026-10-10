@@ -107,6 +107,7 @@ int main()
     /* Create the graphics context used by the UI for drawing */
     GC gc = XCreateGC(display, window, 0, NULL);
 
+    ui_init(display, window, screen);
 
     /*
         Subscribe to the events this window needs to observe

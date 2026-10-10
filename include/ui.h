@@ -9,9 +9,15 @@
 
     The caller owns the window and graphics context.
 */
-
-
 void ui_draw(Display *display, Window window, GC gc, int screen);
+
+
+/*
+    Draw the lock-screen contents into the supplied window.
+*/
+
+void ui_init(Display *display, Window window, int screen);
+
 
 
 #endif
