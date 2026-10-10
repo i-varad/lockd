@@ -4,6 +4,7 @@
 #include <X11/keysym.h>
 
 #include "input.h"
+#include "ui.h"
 
 /*
     READY : no input grabs are held by lockd.
@@ -101,6 +102,12 @@ int main()
         0,
         0);
 
+
+
+    /* Create the graphics context used by the UI for drawing */
+    GC gc = XCreateGC(display, window, 0, NULL);
+
+
     /*
         Subscribe to the events this window needs to observe
         StructureNotifyMask allows lockd to recieve notification about
@@ -151,6 +158,8 @@ int main()
                 window,
                 RevertToParent,
                 CurrentTime);
+
+            ui_draw(display, window, gc, screen);
 
             XFlush(display);
         }
@@ -278,6 +287,17 @@ int main()
             running = 0;
         }
 
+
+
+        /* 
+            Redraw the UI when the X server reports that part of 
+            the window needs to be repainted.
+        */
+       if(event.type == Expose && event.xexpose.count == 0){
+            ui_draw(display, window, gc, screen);
+            XFlush(display);
+       }
+
     }
 
 
@@ -295,7 +315,9 @@ int main()
     }
 
 
-
+    /* releasing the graphics context */
+    XFreeGC(display, gc);
+    
     XDestroyWindow(display, window);
     XCloseDisplay(display);
 

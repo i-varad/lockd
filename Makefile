@@ -3,7 +3,7 @@ CFLAGS := -Wall -Wextra -Wpedantic -std=c17 -Iinclude
 LDLIBS := -lX11
 
 TARGET := lockd
-SOURCES := src/main.c src/input.c
+SOURCES := src/main.c src/input.c src/ui.c
 
 .PHONY: all clean
 
