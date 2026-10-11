@@ -5,6 +5,9 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <X11/extensions/Xinerama.h>
+#include <poll.h>
+#include <time.h>
+#include <errno.h>
 
 #include "input.h"
 #include "ui.h"
@@ -221,99 +224,171 @@ int main(void)
         RevertToParent,
         CurrentTime);
 
+    time_t last_clock_minute = time(NULL) / 60;
+
     while (running)
     {
-        XEvent event;
-        XNextEvent(display, &event);
+        /*
+         * Wait up to one second for X11 activity.
+         * A timeout lets us refresh the clock even when idle.
+         */
+        struct pollfd x11_fd = {
+            .fd = ConnectionNumber(display),
+            .events = POLLIN};
 
-        int index = find_window(
-            windows, monitor_count, event.xany.window);
+        int poll_result = poll(&x11_fd, 1, 1000);
 
-        if (index < 0)
+        if (poll_result < 0)
         {
-            continue;
-        }
-
-        Window window = windows[index].window;
-        GC gc = windows[index].gc;
-        XineramaScreenInfo *monitor = &windows[index].monitor;
-
-        if (event.type == MapNotify)
-        {
-            printf("lockd: monitor %d window mapped: 0x%lx\n",
-                   index, window);
-
-            ui_draw(display, window, gc, screen, monitor);
-            XFlush(display);
-        }
-        else if (event.type == Expose && event.xexpose.count == 0)
-        {
-            ui_draw(display, window, gc, screen, monitor);
-            XFlush(display);
-        }
-        else if (event.type == ButtonPress)
-        {
-            printf("lockd: monitor %d ButtonPress button=%u\n",
-                   index, event.xbutton.button);
-        }
-        else if (event.type == KeyPress)
-        {
-            KeySym keysym;
-            char buffer[32];
-
-            int length = XLookupString(
-                &event.xkey,
-                buffer,
-                sizeof(buffer) - 1,
-                &keysym,
-                NULL);
-
-            buffer[length] = '\0';
-
-            const char *name = XKeysymToString(keysym);
-
-            printf("lockd: KeyPress keysym=%s text=\"%s\"\n",
-                   name != NULL ? name : "Unknown",
-                   buffer);
-
-            if (keysym == XK_q)
+            if (errno == EINTR)
             {
-                printf("lockd: shutdown requested\n");
-                running = 0;
+                continue;
             }
-            else if (keysym == XK_g && state == READY)
+
+            perror("lockd: poll");
+            break;
+        }
+
+        if (poll_result > 0 && (x11_fd.revents & POLLIN))
+        {
+            /*
+             * Process all events already queued by Xlib.
+             * Do not wait for another event inside this loop.
+             */
+            while (XPending(display) > 0 && running)
             {
-                if (acquire_input(display, window))
+                XEvent event;
+                XNextEvent(display, &event);
+
+                int index = find_window(
+                    windows,
+                    monitor_count,
+                    event.xany.window);
+
+                if (index < 0)
                 {
-                    state = GRABBED;
+                    continue;
                 }
 
-                printf("lockd: state=%s\n",
-                       lock_state_name(state));
-            }
-            else if (keysym == XK_u && state == GRABBED)
-            {
-                release_input(display);
-                state = READY;
+                Window window = windows[index].window;
+                GC gc = windows[index].gc;
+                XineramaScreenInfo *monitor =
+                    &windows[index].monitor;
 
-                printf("lockd: state=%s\n",
-                       lock_state_name(state));
+                if (event.type == MapNotify)
+                {
+                    printf(
+                        "lockd: monitor %d window mapped: 0x%lx\n",
+                        index,
+                        window);
+
+                    ui_draw(display, window, gc, screen, monitor);
+                }
+                else if (event.type == Expose &&
+                         event.xexpose.count == 0)
+                {
+                    ui_draw(display, window, gc, screen, monitor);
+                }
+                else if (event.type == ButtonPress)
+                {
+                    printf(
+                        "lockd: monitor %d ButtonPress button=%u\n",
+                        index,
+                        event.xbutton.button);
+                }
+                else if (event.type == KeyPress)
+                {
+                    KeySym keysym;
+                    char buffer[32];
+
+                    int length = XLookupString(
+                        &event.xkey,
+                        buffer,
+                        sizeof(buffer) - 1,
+                        &keysym,
+                        NULL);
+
+                    buffer[length] = '\0';
+
+                    const char *name = XKeysymToString(keysym);
+
+                    printf(
+                        "lockd: KeyPress keysym=%s text=\"%s\"\n",
+                        name != NULL ? name : "Unknown",
+                        buffer);
+
+                    if (keysym == XK_q)
+                    {
+                        printf("lockd: shutdown requested\n");
+                        running = 0;
+                    }
+                    else if (keysym == XK_g && state == READY)
+                    {
+                        if (acquire_input(display, window))
+                        {
+                            state = GRABBED;
+                        }
+
+                        printf(
+                            "lockd: state=%s\n",
+                            lock_state_name(state));
+                    }
+                    else if (keysym == XK_u && state == GRABBED)
+                    {
+                        release_input(display);
+                        state = READY;
+
+                        printf(
+                            "lockd: state=%s\n",
+                            lock_state_name(state));
+                    }
+                }
+                else if (event.type == KeyRelease)
+                {
+                    printf(
+                        "lockd: KeyRelease keycode=%u\n",
+                        event.xkey.keycode);
+                }
+                else if (event.type == UnmapNotify)
+                {
+                    printf(
+                        "lockd: monitor %d window unmapped\n",
+                        index);
+                }
+                else if (event.type == DestroyNotify)
+                {
+                    printf(
+                        "lockd: monitor %d window destroyed\n",
+                        index);
+
+                    running = 0;
+                }
             }
         }
-        else if (event.type == KeyRelease)
+
+        /*
+         * Redraw both clocks only when the minute changes.
+         * This avoids clearing and redrawing identical text
+         * every second.
+         */
+        time_t current_minute = time(NULL) / 60;
+
+        if (current_minute != last_clock_minute)
         {
-            printf("lockd: KeyRelease keycode=%u\n",
-                   event.xkey.keycode);
+            last_clock_minute = current_minute;
+
+            for (int i = 0; i < monitor_count; i++)
+            {
+                ui_draw(
+                    display,
+                    windows[i].window,
+                    windows[i].gc,
+                    screen,
+                    &windows[i].monitor);
+            }
         }
-        else if (event.type == UnmapNotify)
-        {
-            printf("lockd: monitor %d window unmapped\n", index);
-        }
-        else if (event.type == DestroyNotify)
-        {
-            printf("lockd: monitor %d window destroyed\n", index);
-            running = 0;
-        }
+
+        XFlush(display);
     }
 
     if (state == GRABBED)
