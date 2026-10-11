@@ -2,6 +2,7 @@
 #define LOCKD_UI_H
 
 #include <X11/Xlib.h>
+#include <stddef.h>
 #include <X11/extensions/Xinerama.h>
 
 /*
@@ -9,7 +10,8 @@
     The caller owns the window and graphics context.
 */
 void ui_draw(Display *display, Window window, GC gc, int screen,
-             const XineramaScreenInfo *monitor);
+             const XineramaScreenInfo *monitor,
+             size_t password_length, const char *status);
 
 /*
     Initialize the lock-screen UI and its fonts.
