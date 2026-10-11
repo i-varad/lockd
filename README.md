@@ -6,6 +6,11 @@
 
 The project is being developed from scratch to understand how a basic screen locker works internally.
 
+
+## Screenshot
+
+![lockd running on a dual-monitor X11 desktop](docs/images/lockd-screenshot.png)
+
 ## Current Progress
 
 The current prototype implements:
