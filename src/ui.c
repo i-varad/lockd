@@ -33,17 +33,17 @@ void ui_init(Display *display, Window window, int screen)
 
     if (clock_font == NULL) {
         clock_font = XftFontOpenName(
-            display, screen, "DejaVu Sans:style=Bold:size=72");
+            display, screen, "DejaVu Sans:size=30");
     }
 
     if (date_font == NULL) {
         date_font = XftFontOpenName(
-            display, screen, "DejaVu Sans:size=20");
+            display, screen, "DejaVu Sans:size=14");
     }
 
     if (input_font == NULL) {
         input_font = XftFontOpenName(
-            display, screen, "DejaVu Sans:size=24");
+            display, screen, "DejaVu Sans:size=12");
     }
 
     if (xft_visual == NULL) {
@@ -159,7 +159,7 @@ void ui_draw(Display *display, Window window, GC gc, int screen,
         (monitor->width - (int)date_extents.xOff) / 2;
 
     int clock_y = monitor->height / 2;
-    int date_y = clock_y + (int)clock_font->height + 12;
+    int date_y = clock_y + (int)clock_font->height;
 
     /*
         Draw the clock.
